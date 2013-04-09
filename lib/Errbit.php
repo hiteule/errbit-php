@@ -151,6 +151,10 @@ class Errbit {
 	public function notify($exception, $options = array()) {
 		$config = array_merge($this->_config, $options);
 
+		if ($config['async'] === true) {
+			return $this->_notifyAsync($exception);
+		}
+
 		$ch = curl_init();
 		curl_setopt_array($ch, array(
 			CURLOPT_URL            => $this->_buildApiUrl(),
@@ -173,6 +177,41 @@ class Errbit {
 	}
 
 	// -- Private Methods
+
+	/**
+	 * Notify an individual exception manually in asynchronous mode.
+	 *
+	 * @param [Exception] $exception
+	 *   the Exception to notify (errors must first be converted)
+	 *
+	 * @return [Errbit]
+	 *   the current instance
+	 */
+	private function _notifyAsync($exception) {
+		$fp = fsockopen($this->_config['host'], $this->_config['port']);
+		if (!$fp) {
+			return false;
+		}
+
+		$xml = $this->_buildNoticeFor($exception, $this->_config);
+
+		$resource = explode('/', $this->_config['host']);
+		unset($resource[0]);
+		$resource = '/' . (implode('/', $resource)) . self::NOTICES_PATH;
+
+		$http = "POST " . $resource . " HTTP/1.1\r\n";
+		$http.= "Host: " . $this->_config['host'] . "\r\n";
+		$http.= "User-Agent: Errbit PHP Notifier\r\n";
+		$http.= "Content-Type: application/x-www-form-urlencoded\r\n";
+		$http.= "Connection: close\r\n";
+		$http.= "Content-Length: " . strlen($xml) . "\r\n\r\n";
+		$http.= $xml;
+
+		fwrite($fp, $http);
+		fclose($fp);
+
+		return $this;
+	}
 
 	private function _checkConfig() {
 		if (empty($this->_config['api_key'])) {
@@ -211,6 +250,10 @@ class Errbit {
 			$this->_config['backtrace_filters'] = array(
 				sprintf('/^%s/', preg_quote($this->_config['project_root'], '/')) => '[PROJECT_ROOT]'
 			);
+		}
+
+		if (!isset($this->_config['async'])) {
+			$this->_config['async'] = false;
 		}
 	}
 
